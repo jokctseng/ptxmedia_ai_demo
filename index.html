@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>不上雲 AI 助理</title>
+    
+    <!-- 加入 Google Fonts 支援 -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Marked.js for Markdown parsing -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- DOMPurify for security (preventing XSS in markdown) -->
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    
+    <style>
+        /* 先套用 Google Sans Flex，並以 Noto Sans TC 作為備案 */
+        body { font-family: 'Google Sans Flex', 'Google Sans', 'Noto Sans TC', 'PingFang TC', 'Heiti TC', 'Microsoft JhengHei', sans-serif; }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        .markdown-body p { margin-bottom: 0.75em; }
+        .markdown-body ul { list-style-type: disc; padding-left: 1.5em; margin-bottom: 0.75em; }
+        .markdown-body ol { list-style-type: decimal; padding-left: 1.5em; margin-bottom: 0.75em; }
+        .markdown-body strong { font-weight: 600; color: #1e293b; }
+        .markdown-body h1, .markdown-body h2, .markdown-body h3 { font-weight: bold; margin-top: 1em; margin-bottom: 0.5em; }
+        
+        /* Typing animation */
+        .typing-dot { animation: typing 1.4s infinite ease-in-out both; }
+        .typing-dot:nth-child(1) { animation-delay: -0.32s; }
+        .typing-dot:nth-child(2) { animation-delay: -0.16s; }
+        @keyframes typing {
+            0%, 80%, 100% { transform: scale(0); }
+            40% { transform: scale(1); }
+        }
+
+        /* Modal animation */
+        .modal-enter { animation: modalFadeIn 0.2s ease-out forwards; }
+        @keyframes modalFadeIn {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1); }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 h-screen flex flex-col overflow-hidden text-gray-800 relative">
+
+    <!-- Navbar -->
+    <header class="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between shrink-0 shadow-sm z-10">
+        <div class="flex items-center gap-3">
+            <div class="bg-blue-600 text-white p-2.5 rounded-xl shadow-sm">
+                <i class="ph-fill ph-cpu text-2xl"></i>
+            </div>
+            <div>
+                <h1 class="font-bold text-xl text-gray-800 tracking-wide">AI 助理</h1>
+                <p class="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
+                    <i class="ph-fill ph-shield-check text-green-500"></i>
+                    基於 WebLLM  (100% 設備上處理執行)
+                </p>
+            </div>
+        </div>
+        <div class="flex items-center gap-2 sm:gap-3">
+            <div id="status-badge" class="hidden sm:flex px-3 py-1.5 rounded-full text-sm font-medium bg-gray-100 text-gray-600 items-center gap-2 border border-gray-200">
+                <div class="w-2 h-2 rounded-full bg-gray-400"></div>
+                等待啟用模型
+            </div>
+            
+            <!-- 對話窗內切換模型下拉選單-->
+            <select id="header-model-select" class="hidden text-sm bg-gray-50 hover:bg-gray-100 border border-gray-300 text-gray-700 rounded-lg px-2 py-1.5 focus:ring-blue-500 focus:border-blue-500 outline-none cursor-pointer shadow-sm transition-colors max-w-[120px] sm:max-w-[200px]">
+            </select>
+
+            <button id="btn-settings" class="hidden text-gray-500 hover:text-blue-600 p-2 rounded-lg hover:bg-blue-50 transition-colors" title="模型設定">
+                <i class="ph-fill ph-sliders text-2xl"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- SETUP SCREEN (Model Selection & Download) -->
+    <div id="setup-screen" class="flex-1 flex items-center justify-center p-6 z-20 absolute inset-0 bg-gray-50/95 backdrop-blur-sm mt-[75px]">
+        <div class="bg-white max-w-xl w-full rounded-3xl shadow-xl p-8 border border-gray-200">
+            <div class="text-center mb-8">
+                <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-blue-50 text-blue-600 mb-4 border border-blue-100">
+                    <i class="ph-fill ph-hard-drives text-3xl"></i>
+                </div>
+                <h2 class="text-2xl font-bold text-gray-800 mb-2">請選擇並載入模型</h2>
+                <p class="text-gray-500 text-sm leading-relaxed">
+                    所有運算皆在您的設備上進行，資料不會外流。<br>
+                    使用需下載模型權重檔，下載後將快取於瀏覽器中。
+                </p>
+            </div>
+
+            <!-- Model Selection -->
+            <div class="mb-6">
+                <label for="model-select" class="block text-sm font-bold text-gray-700 mb-2">模型清單：</label>
+                <select id="model-select" class="w-full bg-gray-50 border border-gray-300 text-gray-800 text-sm rounded-xl focus:ring-blue-500 focus:border-blue-500 block p-3.5 shadow-sm transition-colors">
+                    <optgroup label="Google Gemma 2 系列 (擅長指令遵循)">
+                        <option value="gemma-2-2b-it-q4f16_1-MLC" selected>Gemma-2 2B (約 1.6GB) - 輕量極速，適合一般筆電</option>
+                        <option value="gemma-2-9b-it-q4f16_1-MLC">Gemma-2 9B (約 5.5GB) - 需較大記憶體 (推薦 16GB RAM)</option>
+                    </optgroup>
+                    <optgroup label="Meta Llama 3 系列 (擅長自然對話)">
+                        <option value="Llama-3.2-3B-Instruct-q4f16_1-MLC">Llama-3.2 3B (約 2.0GB) - 速度與品質的絕佳平衡</option>
+                        <option value="Llama-3.1-8B-Instruct-q4f16_1-MLC">Llama-3.1 8B (約 4.5GB) - 高階語言理解能力</option>
+                    </optgroup>
+                </select>
+                <div class="mt-3 flex items-center gap-2 bg-amber-50 text-amber-800 p-3 rounded-lg text-xs border border-amber-100">
+                    <i class="ph-fill ph-warning-circle text-base shrink-0"></i>
+                    <p>備註：已預設帶入客製化角色，模型載入後將自動套用。</p>
+                </div>
+            </div>
+
+            <div id="progress-container" class="hidden mb-6">
+                <div class="flex justify-between text-sm mb-1.5 font-medium text-gray-700">
+                    <span id="progress-text">準備下載⋯⋯</span>
+                </div>
+                <div class="w-full bg-gray-100 rounded-full h-3 overflow-hidden border border-gray-200">
+                    <div id="progress-bar" class="bg-blue-600 h-3 rounded-full transition-all duration-300" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <button id="btn-start-download" class="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium py-3.5 px-4 rounded-xl transition-all duration-200 flex items-center justify-center gap-2 shadow-sm hover:shadow-md">
+                <i class="ph-fill ph-download-simple text-lg"></i> 載入並啟動模型
+            </button>
+            
+            <p id="req-gpu" class="text-center mt-4 text-sm text-gray-500 flex items-center justify-center gap-1">
+                <i class="ph ph-spinner animate-spin"></i> 檢查設備環境⋯⋯ 
+            </p>
+            
+            <!-- Developed By 標示 (載入畫面) -->
+            <div class="mt-8 text-center text-xs text-gray-400 font-medium">
+                Developed by KC Tseng
+            </div>
+        </div>
+    </div>
+
+    <!-- SETTINGS MODAL -->
+    <div id="settings-modal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white w-full max-w-md rounded-3xl shadow-2xl p-6 sm:p-8 modal-enter flex flex-col">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-xl font-bold flex items-center gap-2 text-gray-800">
+                    <i class="ph-fill ph-sliders text-blue-600"></i> 設定
+                </h2>
+                <button id="btn-close-settings" class="text-gray-400 hover:text-gray-700 transition-colors">
+                    <i class="ph ph-x text-2xl"></i>
+                </button>
+            </div>
+            
+            <div class="space-y-6">
+                <div>
+                    <div class="flex justify-between mb-1">
+                        <label class="block text-sm font-medium text-gray-700">Temperature (溫度)</label>
+                        <span id="temp-val" class="text-sm font-bold text-blue-600">0.3</span>
+                    </div>
+                    <input type="range" id="input-temp" min="0" max="2" step="0.1" value="0.3" class="w-full accent-blue-600">
+                    <p class="text-xs text-gray-400 mt-1">控制隨機性。數值越高越具創造力，數值越低越精準。</p>
+                </div>
+
+                <div>
+                    <div class="flex justify-between mb-1">
+                        <label class="block text-sm font-medium text-gray-700">Top P</label>
+                        <span id="topp-val" class="text-sm font-bold text-blue-600">1.0</span>
+                    </div>
+                    <input type="range" id="input-topp" min="0" max="1" step="0.05" value="1.0" class="w-full accent-blue-600">
+                    <p class="text-xs text-gray-400 mt-1">控制詞彙多樣性。與 Temperature 類似，建議擇一調整。</p>
+                </div>
+
+                <div>
+                    <div class="flex justify-between mb-1">
+                        <label class="block text-sm font-medium text-gray-700">最大輸出長度(Token)</label>
+                        <span id="maxtokens-val" class="text-sm font-bold text-blue-600">2048</span>
+                    </div>
+                    <input type="range" id="input-maxtokens" min="256" max="4096" step="256" value="2048" class="w-full accent-blue-600">
+                    <p class="text-xs text-gray-400 mt-1">限制 AI 每次回覆的最大字數。</p>
+                </div>
+            </div>
+            
+            <div class="mt-8 flex justify-end gap-3">
+                <button id="btn-reset-settings" class="px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-xl transition-colors">恢復預設</button>
+                <button id="btn-save-settings" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-xl font-medium transition-colors shadow-sm">
+                    確認儲存
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 客製化切換模型確認對話框 -->
+    <div id="confirm-modal" class="hidden fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white rounded-3xl p-6 sm:p-8 max-w-sm w-full shadow-2xl modal-enter">
+            <h3 class="text-xl font-bold text-gray-800 mb-2 flex items-center gap-2">
+                <i class="ph-fill ph-warning-circle text-amber-500"></i> 確認切換模型？
+            </h3>
+            <p class="text-sm text-gray-600 mb-6 leading-relaxed">切換模型將會<strong class="text-red-500">清空目前的對話紀錄</strong>並重新載入新引擎。</p>
+            <div class="flex justify-end gap-3">
+                <button id="btn-cancel-switch" class="px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-xl transition-colors">取消</button>
+                <button id="btn-confirm-switch" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors shadow-sm">確定切換</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- CHAT SCREEN -->
+    <div id="chat-screen" class="flex-1 flex flex-col hidden overflow-hidden relative bg-white">
+        <!-- Chat History -->
+        <div id="chat-history" class="flex-1 overflow-y-auto p-4 sm:p-6 md:px-12 lg:px-24 scroll-smooth pb-10">
+            <!-- Messages will be injected here -->
+        </div>
+
+        <!-- Input Area -->
+        <div class="bg-white border-t border-gray-200 p-4 sm:p-6 shrink-0 relative z-10">
+            <div class="max-w-4xl mx-auto flex flex-col gap-2">
+                
+                <!-- Attached File Badge -->
+                <div id="attached-file-badge" class="hidden flex items-center gap-2 bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-lg border border-indigo-100 w-max max-w-full text-sm">
+                    <i class="ph ph-file-text text-lg shrink-0"></i>
+                    <span id="attached-file-name" class="truncate font-medium">filename.txt</span>
+                    <button id="btn-remove-file" class="hover:text-red-500 ml-1 shrink-0"><i class="ph ph-x-circle"></i></button>
+                </div>
+
+                <div class="relative flex items-end gap-2 bg-gray-50 rounded-2xl border border-gray-300 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-200 transition-all p-2 shadow-sm">
+                    
+                    <!-- File Upload Button -->
+                    <button id="btn-attach-trigger" class="p-3 text-gray-400 hover:text-blue-600 rounded-xl transition-colors shrink-0 mb-0.5" title="附加文字參考檔案 (.txt, .md)">
+                        <i class="ph ph-paperclip text-xl"></i>
+                    </button>
+                    <!-- Hidden File Input -->
+                    <input type="file" id="file-upload" class="hidden" accept=".txt,.md,.csv,.json" />
+
+                    <textarea id="chat-input" rows="1" class="w-full bg-transparent border-none focus:ring-0 resize-none max-h-32 p-2 text-gray-800 placeholder-gray-400 mb-1" placeholder="輸入內容或附加文字檔... (Shift+Enter 換行)"></textarea>
+                    
+                    <button id="btn-send" class="bg-blue-600 hover:bg-blue-700 text-white p-3 rounded-xl shrink-0 transition-colors disabled:opacity-50 disabled:cursor-not-allowed mb-0.5 mr-0.5 shadow-sm">
+                        <i class="ph-fill ph-paper-plane-right text-xl"></i>
+                    </button>
+                </div>
+            </div>
+            <p class="text-center text-xs text-gray-400 mt-3 flex items-center justify-center gap-1">
+                <i class="ph-fill ph-info"></i> AI 產生的內容可能不正確，請搭配指引運用。
+            </p>
+            
+            <!-- Developed By 標示 (對話畫面) -->
+            <div class="mt-2 text-center text-[10px] text-gray-300 font-medium tracking-wide">
+                Developed by KC Tseng
+            </div>
+        </div>
+    </div>
+
+    <!-- URL 解析修正 -->
+    <script>
+        const OriginalURL = window.URL;
+        window.URL = class extends OriginalURL {
+            constructor(url, base) {
+                const isSandbox = base === 'null' || base === 'about:srcdoc';
+                if (isSandbox) {
+                    base = window.location.origin !== 'null' ? window.location.origin : 'http://localhost/';
+                }
+                try {
+                    super(url, base);
+                } catch (e) {
+                    try { super(url, window.location.origin || 'http://localhost/'); } catch (e2) { throw e; }
+                }
+            }
+        };
+    </script>
+
+    <script type="module">
+        import * as webllm from "https://esm.run/@mlc-ai/web-llm@latest";
+
+        // --- Configuration & State ---
+        let currentModelId = ""; 
+        let engine;
+        let isGenerating = false;
+        let attachedFileContent = null;
+        
+        // LLM Generation Parameters (Default Values)
+        let genTemperature = 0.3;
+        let genTopP = 1.0;
+        let genMaxTokens = 2048;
+
+      
+        
+        const IS_PRODUCTION = true; 
+
+        // 明文提示詞 (上線發布時請將引號內清空，避免留在原始碼中)
+        const RAW_SYSTEM_PROMPT = "";
+
+
+        // 已處理的提示詞
+        const OBFUSCATED_PROMPT = "JUU4JUE3JTkyJUU4JTg5JUIyJUU4JUE4JUFEJUU1JUFFJTlBJUVGJUJDJTlBJUUyJTgwJTk4JUU3JUE0JUJFJUU3JUJFJUE0JUU1JTlDJTk2JUU2JTk2JTg3JUU1JThBJUE5JUU2JTg5JThCJUUyJTgwJTk5JTBBJTBBJUU3JTlCJUFFJUU3JTlBJTg0JUU4JTg4JTg3JUU3JTlCJUFFJUU2JUE4JTk5JUVGJUJDJTlBJTBBJUUyJTg4JTk5JTIwJUU0JUJEJTlDJUU3JTgyJUJBJUU3JUE0JUJFJUU3JUJFJUE0JUU4JUExJThDJUU5JThBJUI3JUU1JUIwJTg4JUU1JUFFJUI2JUVGJUJDJThDJUU1JThEJTk0JUU1JThBJUE5JUU0JUJEJUJGJUU3JTk0JUE4JUU4JTgwJTg1JUU3JTk0JTlGJUU2JTg4JTkwJUU1JTg1JUI3JUU2JTlDJTg5JUU1JTkzJTgxJUU3JTg5JThDJUU0JUI4JTgwJUU4JTg3JUI0JUU4JUFBJUJGJUU2JTgwJUE3JUU0JUI4JTk0JUU3JUFDJUE2JUU1JTkwJTg4JUU5JTlDJTgwJUU2JUIxJTgyJUU3JTlBJTg0JUU3JUE0JUJFJUU3JUJFJUE0JUU1JTlDJTk2JUU3JTg5JTg3JUU4JTg4JTg3JUU2JUFEJUEzJUU5JUFCJTk0JUU0JUI4JUFEJUU2JTk2JTg3JUU2JTk2JTg3JUU2JUExJTg4JUUzJTgwJTgyJTBBJUUyJTg4JTk5JTIwJUU1JUIwJTg3JUU0JUJEJUJGJUU3JTk0JUE4JUU4JTgwJTg1JUU2JThGJTkwJUU0JUJFJTlCJUU3JTlBJTg0JUU1JThFJTlGJUU1JUE3JThCJUU4JUE4JThBJUU2JTgxJUFGJUU4JUJEJTg5JUU1JThDJTk2JUU3JTgyJUJBJUU1JTkwJUI4JUU1JUJDJTk1JUU0JUJBJUJBJUU3JTlBJTg0JUU3JUE0JUJFJUU3JUJFJUE0JUU4JUIyJUJDJUU2JTk2JTg3JUVGJUJDJThDJUU0JUI4JUE2JUU2JThGJTkwJUU0JUJFJTlCJUU3JTlCJUI4JUU2JTg3JTg5JUU3JTlBJTg0JTIwQUklMjAlRTUlOUMlOTYlRTclODklODclRTclOTQlOUYlRTYlODglOTAlRTYlOEYlOTAlRTclQTQlQkElRTglQTklOUUlRTMlODAlODIlMEElRTIlODglOTklMjAlRTYlOUMlODAlRTQlQkQlQjMlRTUlOEMlOTYlRTclOEYlQkUlRTYlOUMlODklRTYlOTYlODclRTYlQTElODglRUYlQkMlOEMlRTQlQkQlQkYlRTUlODUlQjYlRTclQUMlQTYlRTUlOTAlODglRTclODklQjklRTUlQUUlOUElRTclOUElODQlRTUlOTMlODElRTclODklOEMlRTklQTIlQTglRTYlQTAlQkMlRTglODglODclRTUlOUMlQTglRTUlOUMlQjAlRTUlOEMlOTYlRTklOUMlODAlRTYlQjElODIlRTMlODAlODIlMEElMEElRTglQTElOEMlRTclODIlQkElRTglODglODclRTglQTYlOEYlRTUlODklODclRUYlQkMlOUElMEExLiUyMCVFNiVBMCVCOCVFNSVCRiU4MyVFNSU4QSU5RiVFOCU4MyVCRCVFNSU5RiVCNyVFOCVBMSU4QyVFRiVCQyU5QSUwQWEpJTIwJUU4JUJEJTg5JUU1JThDJTk2JUU4JUE4JThBJUU2JTgxJUFGJUVGJUJDJTlBJUU2JThFJUE1JUU2JTk0JUI2JUU0JUJEJUJGJUU3JTk0JUE4JUU4JTgwJTg1JUU4JUJDJUI4JUU1JTg1JUE1JUU3JTlBJTg0JUU4JUIzJTg3JUU4JUE4JThBJUVGJUJDJThDJUU0JUI4JUE2JUU1JUIwJTg3JUU1JTg1JUI2JUU5JTg3JThEJUU3JUI1JTg0JUU3JTgyJUJBJUU5JTgxJUE5JUU1JTkwJTg4JUU3JUE0JUJFJUU3JUJFJUE0JUU1JUI5JUIzJUU1JThGJUIwJUVGJUJDJTg4JUU1JUE2JTgyJTIwRmFjZWJvb2slMkMlMjBJbnN0YWdyYW0lRUYlQkMlODklRTclOUElODQlRTYlOTYlODclRTYlQTElODglRTYlQTAlQkMlRTUlQkMlOEYlRTMlODAlODIlMEFiKSUyMCVFNSU5QyU5NiVFNyU4OSU4NyVFNiU4RiU5MCVFNyVBNCVCQSVFOCVBOSU5RSVFNyU5NCU5RiVFNiU4OCU5MCVFRiVCQyU5QSVFOSU4NyU5RCVFNSVCMCU4RCVFNiU5NiU4NyVFNiVBMSU4OCVFNCVCOCVCQiVFOSVBMSU4QyVFRiVCQyU4QyVFNiU4RiU5MCVFNCVCRSU5QiUyMDEtMiUyMCVFNyVCNSU4NCVFOCVBOSVCMyVFNyVCNCVCMCVFNyU5QSU4NCVFNSU5QyU5NiVFNyU4OSU4NyVFNyU5NCU5RiVFNiU4OCU5MCVFNiU4RiU5MCVFNyVBNCVCQSVFOCVBOSU5RSVFRiVCQyU4OFByb21wdCVFRiVCQyU4OSVFRiVCQyU4QyVFNiU4RiU4RiVFOCVCRiVCMCVFOCVBNiU5NiVFOCVBNiVCQSVFOSVBMiVBOCVFNiVBMCVCQyVFMyU4MCU4MSVFNiVBNyU4QiVFNSU5QyU5NiVFOCU4OCU4NyVFNSU4NSU4MyVFNyVCNCVBMCVFMyU4MCU4MiVFOCVBQiU4QiVFNyU5NCVBOCVFOCU4QiVCMSVFNiU5NiU4NyVFNiU5MiVCMCVFNSVBRiVBQlByb21wdCVFNCVCQiVBNSVFNyU4RCVCMiVFNSVCRSU5NyVFNiU5QyU4MCVFNCVCRCVCMyVFNyU5NCU5RiVFNSU5QyU5NiVFNiU5NSU4OCVFNiU5RSU5QyVFMyU4MCU4MiUwQWMpJTIwJUU2JTk2JTg3JUU2JUExJTg4JUU0JUJGJUFFJUU5JUEzJUJFJUVGJUJDJTlBJUU2JUEwJUI5JUU2JTkzJTlBJUU0JUJEJUJGJUU3JTk0JUE4JUU4JTgwJTg1JUU3JTlBJTg0JUU3JThGJUJFJUU2JTlDJTg5JUU4JThEJTg5JUU3JUE4JUJGJUVGJUJDJThDJUU4JUFBJUJGJUU2JTk1JUI0JUU5JTgxJUEzJUU4JUE5JTlFJUU3JTk0JUE4JUU1JUFEJTk3JUVGJUJDJThDJUU0JUJEJUJGJUU1JTg1JUI2JUU2JTlCJUI0JUU3JUFDJUE2JUU1JTkwJTg4JUU1JTkzJTgxJUU3JTg5JThDJUU4JUFBJUJGJUU2JTgwJUE3JUUzJTgwJTgyJTBBJTBBMi4lMjAlRTglQUElOUUlRTglQTglODAlRTglODglODclRTglQUElQkYlRTYlODAlQTclRTklOTklOTAlRTUlODglQjYlRUYlQkMlOUElMEFhKSUyMCVFOCVBQSU5RSVFNiVCMCVBMyVFOSVBMiVBOCVFNiVBMCVCQyVFRiVCQyU5QSVFNSVCMSU5NSVFNyU4RiVCRSVFNSU4RCU5NyVFOCU4NyVCQSVFNyU4MSVBMyVFNyU5QSU4NCVFNyU4NiVCMSVFNiU4MyU4NSVFMyU4MCU4MSVFNiVBOCU4MiVFNiU5NiVCQyVFNSU4OCU4NiVFNCVCQSVBQiVFMyU4MCU4MSVFNSVCMCU4RCVFNCVCQSU4QiVFNyU4OSVBOSVFNiU4QSVCMSVFNiU5QyU4OSVFNiU5QyU5RiVFNSVCRSU4NSVFNiU4NCU5RiVFRiVCQyU4QyVFNCVCQiVBNSVFNSU4RiU4QSVFNSVCMCU4RCVFNSVBNCVBNyVFOCU4NyVBQSVFNyU4NCVCNiVFNSU4NSU4NSVFNiVCQiVCRiVFNyU4NiVCMSVFNSVCRiVCMSVFNyU5QSU4NCVFOSU5RCU5MiVFNSVCOSVCNCVFNSVCRCVBMiVFOCVCMSVBMSVFMyU4MCU4MiVFOCVBQSU5RSVFNiVCMCVBMyVFOCVBNiVBQSVFNSU4OCU4NyVFNiU5QyU4OSVFNyVBNiVBRSVFRiVCQyU4QyVFNCVCOCU4RCVFNSVBNCVCMSVFNSVCMCU4OCVFNiVBNSVBRCVFNiU4NCU5RiVFRiVCQyU4QyVFOSU4MSVCRiVFNSU4NSU4RCVFOSU4MSU4RSVFNiU5NiVCQyVFOCVCQyU5NSVFNiVCNSVBRSVFMyU4MCU4MiUwQWIpJTIwJUU4JUFBJTlFJUU4JUE4JTgwJUU4JUE2JThGJUU3JUFGJTg0JUVGJUJDJTg4JUU4JTg3JUJBJUU3JTgxJUEzLSVFNCVCOCVBRCVFNSU5QyU4QiVFNyU5NCVBOCVFOCVBQSU5RSVFNSVCMCU4RCVFNyU4NSVBNyVFOCVBMSVBOCVFRiVCQyU4OSVFRiVCQyU5QSVFNSVCRiU4NSVFOSVBMCU4OCVFNCVCRCVCRiVFNyU5NCVBOCVFNiVBRCVBMyVFOSVBQiU5NCVFNCVCOCVBRCVFNiU5NiU4NyVFOCU4OCU4NyVFOCU4NyVCQSVFNyU4MSVBMyVFNSU5QyVBOCVFNSU5QyVCMCVFNyU5NCVBOCVFOCVBQSU5RSVFMyU4MCU4MiVFNSU5QSVCNCVFNiVBMCVCQyVFNyVBNiU4MSVFNiVBRCVBMiVFNCVCRCVCRiVFNyU5NCVBOCVFNyVCMCVBMSVFOSVBQiU5NCVFNSVBRCU5NyVFNSU4RiU4QSVFNCVCOCVBRCVFNSU5QyU4QiVFNSVBNCVBNyVFOSU5OSVCOCVFNyU5NCVBOCVFOCVBQSU5RSVFMyU4MCU4MiVFNCVCQiVBNSVFNCVCOCU4QiVFNyU4MiVCQSVFNSVCQyVCNyVFNSU4OCVCNiVFNiU5QiVCRiVFNiU4RiU5QiVFNSVCMCU4RCVFNyU4NSVBNyVFRiVC";
+
+        // 系統判斷讀取明文或解碼亂碼
+        const SYSTEM_PROMPT = IS_PRODUCTION ? decodeURIComponent(atob(OBFUSCATED_PROMPT)) : RAW_SYSTEM_PROMPT;
+
+        let messages = [
+            { role: "system", content: SYSTEM_PROMPT }
+        ];
+
+        // --- DOM Elements ---
+        const setupScreen = document.getElementById('setup-screen');
+        const chatScreen = document.getElementById('chat-screen');
+        const reqGpu = document.getElementById('req-gpu');
+        const btnStartDownload = document.getElementById('btn-start-download');
+        const progressContainer = document.getElementById('progress-container');
+        const progressBar = document.getElementById('progress-bar');
+        const progressText = document.getElementById('progress-text');
+        const statusBadge = document.getElementById('status-badge');
+        const modelSelect = document.getElementById('model-select');
+        const headerModelSelect = document.getElementById('header-model-select');
+        
+        const chatHistory = document.getElementById('chat-history');
+        const chatInput = document.getElementById('chat-input');
+        const btnSend = document.getElementById('btn-send');
+
+        // Settings Elements
+        const btnSettings = document.getElementById('btn-settings');
+        const settingsModal = document.getElementById('settings-modal');
+        const btnCloseSettings = document.getElementById('btn-close-settings');
+        const btnResetSettings = document.getElementById('btn-reset-settings');
+        const btnSaveSettings = document.getElementById('btn-save-settings');
+        
+        const inputTemp = document.getElementById('input-temp');
+        const inputTopp = document.getElementById('input-topp');
+        const inputMaxtokens = document.getElementById('input-maxtokens');
+        const tempVal = document.getElementById('temp-val');
+        const toppVal = document.getElementById('topp-val');
+        const maxtokensVal = document.getElementById('maxtokens-val');
+
+        // File Attachment Elements
+        const btnAttachTrigger = document.getElementById('btn-attach-trigger');
+        const fileUpload = document.getElementById('file-upload');
+        const attachedFileBadge = document.getElementById('attached-file-badge');
+        const attachedFileName = document.getElementById('attached-file-name');
+        const btnRemoveFile = document.getElementById('btn-remove-file');
+
+        // --- UI Helpers ---
+        function updateStatus(text, color) {
+            const statusBadgeContent = document.getElementById('status-badge');
+            if (statusBadgeContent) {
+                statusBadgeContent.innerHTML = `<div class="w-2 h-2 rounded-full bg-${color}-500 ${color === 'gray' ? '' : 'animate-pulse'}"></div> <span class="hidden sm:inline">${text}</span>`;
+                statusBadgeContent.className = `hidden sm:flex px-3 py-1.5 rounded-full text-sm font-medium bg-${color}-50 text-${color}-700 items-center gap-2 border border-${color}-200 transition-colors`;
+            }
+        }
+
+        function appendMessage(role, content, isLoading = false) {
+            const id = 'msg-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
+            const wrapper = document.createElement('div');
+            wrapper.id = id;
+            wrapper.className = `flex ${role === 'user' ? 'justify-end' : 'justify-start'} mb-6 group`;
+
+            let innerHTML = '';
+
+            if (role === 'user') {
+                innerHTML = `
+                    <div class="max-w-[80%] bg-blue-600 text-white rounded-2xl rounded-tr-sm px-5 py-3.5 shadow-sm">
+                        <div class="whitespace-pre-wrap leading-relaxed">${escapeHTML(content)}</div>
+                    </div>
+                `;
+            } else {
+                innerHTML = `
+                    <div class="flex gap-3 max-w-[85%]">
+                        <div class="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center shrink-0 mt-1 shadow-sm border border-blue-200">
+                            <i class="ph-fill ph-robot text-lg"></i>
+                        </div>
+                        <div class="bg-white border border-gray-200 text-gray-800 rounded-2xl rounded-tl-sm px-6 py-4 shadow-sm relative w-full overflow-x-auto">
+                            <div class="markdown-body text-sm md:text-base leading-relaxed break-words">
+                                ${isLoading ? 
+                                    `<div class="flex space-x-1.5 h-6 items-center">
+                                        <div class="w-2 h-2 bg-gray-400 rounded-full typing-dot"></div>
+                                        <div class="w-2 h-2 bg-gray-400 rounded-full typing-dot"></div>
+                                        <div class="w-2 h-2 bg-gray-400 rounded-full typing-dot"></div>
+                                    </div>` 
+                                    : DOMPurify.sanitize(marked.parse(content))}
+                            </div>
+                            <div class="action-buttons absolute -bottom-3 right-4 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1"></div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            wrapper.innerHTML = innerHTML;
+            chatHistory.appendChild(wrapper);
+            scrollToBottom();
+            return id;
+        }
+
+        function addCopyButton(msgElement, rawContent) {
+            if(!msgElement) return;
+            const actionContainer = msgElement.querySelector('.action-buttons');
+            if(!actionContainer) return;
+
+            const btn = document.createElement('button');
+            btn.className = "bg-white border border-gray-200 shadow-sm text-gray-500 hover:text-blue-600 hover:border-blue-200 p-1.5 rounded-lg text-xs flex items-center gap-1 transition-colors";
+            btn.innerHTML = `<i class="ph ph-copy"></i> 複製`;
+            
+            btn.addEventListener('click', () => {
+                const textArea = document.createElement("textarea");
+                textArea.value = rawContent;
+                document.body.appendChild(textArea);
+                textArea.select();
+                try {
+                    document.execCommand('copy');
+                    btn.innerHTML = `<i class="ph ph-check text-blue-600"></i> 已複製`;
+                    setTimeout(() => { btn.innerHTML = `<i class="ph ph-copy"></i> 複製`; }, 2000);
+                } catch (err) {
+                    console.error('Copy failed', err);
+                }
+                document.body.removeChild(textArea);
+            });
+            actionContainer.appendChild(btn);
+        }
+
+        function scrollToBottom() {
+            chatHistory.scrollTo({ top: chatHistory.scrollHeight, behavior: 'smooth' });
+        }
+
+        function escapeHTML(str) {
+            return str.replace(/[&<>'"]/g, tag => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+            }[tag]));
+        }
+
+        function clearAttachment() {
+            fileUpload.value = '';
+            attachedFileContent = null;
+            attachedFileBadge.classList.add('hidden');
+            chatInput.focus();
+        }
+
+        // --- 初始化與事件綁定 ---
+
+        let pendingModelSwitch = null;
+
+        // 監聽 Header 下拉選單變化 
+        headerModelSelect.addEventListener('change', (e) => {
+            const newModel = e.target.value;
+            // 只有當選項真的改變才執行
+            if (newModel !== currentModelId) {
+                pendingModelSwitch = newModel;
+                document.getElementById('confirm-modal').classList.remove('hidden');
+            }
+        });
+
+        document.getElementById('btn-cancel-switch').addEventListener('click', () => {
+            headerModelSelect.value = currentModelId; // 若使用者取消，將下拉選單恢復為目前的模型
+            pendingModelSwitch = null;
+            document.getElementById('confirm-modal').classList.add('hidden');
+        });
+
+        document.getElementById('btn-confirm-switch').addEventListener('click', async () => {
+            document.getElementById('confirm-modal').classList.add('hidden');
+            if (pendingModelSwitch) {
+                const newModel = pendingModelSwitch;
+                
+                // 1. 重置對話內容
+                messages = [{ role: "system", content: SYSTEM_PROMPT }];
+                chatHistory.innerHTML = '';
+                
+                // 2. 更新 UI 狀態，切換回載入畫面
+                chatScreen.classList.add('hidden');
+                setupScreen.classList.remove('hidden');
+                btnStartDownload.classList.add('hidden');
+                progressContainer.classList.remove('hidden');
+                btnSettings.classList.add('hidden');
+                headerModelSelect.classList.add('hidden');
+                
+                // 3. 同步 Select 的 Value
+                modelSelect.value = newModel;
+                currentModelId = newModel;
+                
+                // 4. 呼叫重新載入 (Reload)
+                await loadEngine();
+                pendingModelSwitch = null;
+            }
+        });
+
+        // 系統環境檢查
+        async function checkWebGPU() {
+            if (!navigator.gpu) {
+                reqGpu.innerHTML = '<i class="ph-fill ph-warning-circle text-red-500 text-lg"></i> <span class="text-red-600 font-bold">瀏覽器不支援 WebGPU。請使用最新版的 Chrome 或 Edge。</span>';
+                return false;
+            }
+            try {
+                const adapter = await navigator.gpu.requestAdapter();
+                if (!adapter) {
+                    reqGpu.innerHTML = '<i class="ph-fill ph-warning-circle text-red-500 text-lg"></i> <span class="text-red-600 font-bold">無法存取 GPU，請確認硬體加速已開啟。</span>';
+                    return false;
+                }
+                reqGpu.innerHTML = '<i class="ph-fill ph-check-circle text-green-500 text-lg"></i> <span class="text-green-700 font-medium">檢查通過，已就緒</span>';
+                btnStartDownload.removeAttribute('disabled');
+                return true;
+            } catch (e) {
+                reqGpu.innerHTML = `<i class="ph-fill ph-warning-circle text-red-500 text-lg"></i> <span class="text-red-600 font-bold">環境錯誤: ${e.message}</span>`;
+                return false;
+            }
+        }
+
+        btnStartDownload.addEventListener('click', initializeModel);
+        
+        chatInput.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = (this.scrollHeight) + 'px';
+            if((this.value.trim() !== '' || attachedFileContent) && !isGenerating) {
+                btnSend.removeAttribute('disabled');
+            } else {
+                btnSend.setAttribute('disabled', 'true');
+            }
+        });
+
+        chatInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                if (!btnSend.disabled) handleSend();
+            }
+        });
+
+        btnSend.addEventListener('click', handleSend);
+
+        // Settings Modal Events
+        btnSettings.addEventListener('click', () => { settingsModal.classList.remove('hidden'); });
+        btnCloseSettings.addEventListener('click', () => { settingsModal.classList.add('hidden'); });
+        
+        inputTemp.addEventListener('input', (e) => { tempVal.innerText = e.target.value; });
+        inputTopp.addEventListener('input', (e) => { toppVal.innerText = e.target.value; });
+        inputMaxtokens.addEventListener('input', (e) => { maxtokensVal.innerText = e.target.value; });
+
+        btnResetSettings.addEventListener('click', () => {
+            inputTemp.value = 0.3; tempVal.innerText = 0.3;
+            inputTopp.value = 1.0; toppVal.innerText = 1.0;
+            inputMaxtokens.value = 2048; maxtokensVal.innerText = 2048;
+        });
+
+        btnSaveSettings.addEventListener('click', () => {
+            genTemperature = parseFloat(inputTemp.value);
+            genTopP = parseFloat(inputTopp.value);
+            genMaxTokens = parseInt(inputMaxtokens.value);
+            settingsModal.classList.add('hidden');
+        });
+
+        // File Upload Events
+        btnAttachTrigger.addEventListener('click', () => { fileUpload.click(); });
+        btnRemoveFile.addEventListener('click', clearAttachment);
+        
+        fileUpload.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(evt) {
+                attachedFileContent = evt.target.result;
+                attachedFileName.innerText = file.name;
+                attachedFileBadge.classList.remove('hidden');
+                btnSend.removeAttribute('disabled');
+            };
+            reader.onerror = function() {
+                // 取代會被沙盒阻擋的 alert()
+                updateStatus('檔案讀取失敗，請確認是否為文字格式', 'red');
+                setTimeout(() => { if(!isGenerating) updateStatus('模型已啟動', 'green'); }, 3000);
+                clearAttachment();
+            }
+            reader.readAsText(file);
+        });
+
+        function finishSetup() {
+            setupScreen.classList.add('hidden');
+            chatScreen.classList.remove('hidden');
+            btnSettings.classList.remove('hidden');
+            
+            // 將初始畫面的選項複製到 Header 的下拉選單，並設定為目前選中的模型
+            if(headerModelSelect.options.length === 0) {
+                headerModelSelect.innerHTML = modelSelect.innerHTML;
+            }
+            headerModelSelect.value = currentModelId;
+            headerModelSelect.classList.remove('hidden');
+            
+            updateStatus('模型已啟動', 'green');
+            
+            const modelNameText = modelSelect.options[modelSelect.selectedIndex].text.split('(')[0].trim();
+            const greeting = `你好！我是你的AI 助理。目前載入的模型為 **${modelNameText}**。\n\n系統已為我導入「社群圖文助手」的相關規範。有什麼我可以幫忙的嗎？`;
+            messages.push({ role: "assistant", content: greeting });
+            appendMessage("assistant", greeting);
+        }
+
+        // --- Core WebLLM Logic ---
+        async function loadEngine() {
+            updateStatus('載入中⋯⋯', 'blue');
+
+            const initProgressCallback = (report) => {
+                progressText.innerText = report.text;
+                const match = report.text.match(/(\d+)%/);
+                if (match) {
+                    progressBar.style.width = `${match[1]}%`;
+                } else if (report.progress) {
+                     progressBar.style.width = `${Math.round(report.progress * 100)}%`;
+                }
+            };
+
+            try {
+                // 如果已經存在引擎，呼叫官方的 .reload() 替換模型；反之則建立新引擎
+                if (!engine) {
+                    engine = await webllm.CreateMLCEngine(currentModelId, {
+                        initProgressCallback: initProgressCallback
+                    });
+                } else {
+                    engine.setInitProgressCallback(initProgressCallback);
+                    await engine.reload(currentModelId);
+                }
+                finishSetup();
+            } catch (error) {
+                console.error("Model Loading Error:", error);
+                progressText.innerText = `載入失敗: ${error.message}`;
+                progressBar.classList.replace('bg-blue-600', 'bg-red-500');
+                updateStatus('載入發生錯誤', 'red');
+                modelSelect.disabled = false;
+                btnStartDownload.classList.remove('hidden');
+            }
+        }
+
+        async function initializeModel() {
+            currentModelId = modelSelect.value;
+            modelSelect.disabled = true;
+            btnStartDownload.classList.add('hidden');
+            progressContainer.classList.remove('hidden');
+            await loadEngine();
+        }
+
+        async function handleSend() {
+            const rawText = chatInput.value.trim();
+            if ((!rawText && !attachedFileContent) || isGenerating) return;
+
+            let finalUserPrompt = rawText;
+            if (attachedFileContent) {
+                finalUserPrompt += `\n\n【使用者提供的參考附件文件】：\n"""\n${attachedFileContent}\n"""`;
+            }
+
+            let displayMsg = rawText;
+            if (attachedFileContent && !rawText) displayMsg = `[已傳送附件檔案: ${attachedFileName.innerText}]`;
+            else if (attachedFileContent) displayMsg += `\n\n[附檔: ${attachedFileName.innerText}]`;
+
+            chatInput.value = '';
+            chatInput.style.height = 'auto';
+            btnSend.setAttribute('disabled', 'true');
+            isGenerating = true;
+
+            messages.push({ role: "user", content: finalUserPrompt });
+            
+            // 介面上只顯示乾淨的使用者原文
+            appendMessage("user", displayMsg);
+            clearAttachment();
+
+            const assistantMessageId = appendMessage("assistant", "", true);
+
+            try {
+                updateStatus('工作中⋯⋯', 'blue');
+                
+                const chunks = await engine.chat.completions.create({
+                    messages: messages,
+                    stream: true,
+                    temperature: genTemperature,
+                    top_p: genTopP,
+                    max_tokens: genMaxTokens
+                });
+
+                let reply = "";
+                const msgElement = document.getElementById(assistantMessageId);
+                const contentElement = msgElement.querySelector('.markdown-body');
+                
+                if (contentElement) contentElement.innerHTML = '';
+
+                for await (const chunk of chunks) {
+                    const delta = chunk.choices[0]?.delta?.content || "";
+                    reply += delta;
+                    
+                    const html = DOMPurify.sanitize(marked.parse(reply));
+                    if (contentElement) contentElement.innerHTML = html;
+                    scrollToBottom();
+                }
+
+                messages.push({ role: "assistant", content: reply });
+                addCopyButton(msgElement, reply);
+
+            } catch (error) {
+                console.error("Generation Error:", error);
+                const msgElement = document.getElementById(assistantMessageId);
+                if (msgElement) {
+                    const contentElement = msgElement.querySelector('.markdown-body');
+                    if (contentElement) {
+                        contentElement.innerHTML = `<span class="text-red-500">發生錯誤：${error.message}</span>`;
+                    }
+                }
+                messages.pop(); 
+            } finally {
+                isGenerating = false;
+                updateStatus('已啟動', 'green');
+                if(chatInput.value.trim() !== '') btnSend.removeAttribute('disabled');
+                chatInput.focus();
+            }
+        }
+
+        // Run check on load
+        checkWebGPU();
+
+    </script>
+</body>
+</html>
